@@ -24,6 +24,7 @@ interface NewWorkspaceProjectPickerInput {
   selectedServerId: string;
   projects: HostProjectListItem[];
   routeProject: HostProjectListItem | null;
+  routeProjectContextViewKey: string | null;
   lastActiveProject: HostProjectListItem | null;
   allowAllProjects: boolean;
 }
@@ -84,6 +85,7 @@ export function useNewWorkspaceProjectPicker({
   selectedServerId,
   projects,
   routeProject,
+  routeProjectContextViewKey,
   lastActiveProject,
   allowAllProjects,
 }: NewWorkspaceProjectPickerInput): NewWorkspaceProjectPickerState {
@@ -104,14 +106,13 @@ export function useNewWorkspaceProjectPicker({
     [allowAllProjects, lastActiveProject, routeProject, selectableProjects, selectedServerId],
   );
 
-  const routeProjectViewKey = routeProject?.viewKey ?? null;
   const selectionContextKey = createProjectSelectionContextKey({
     selectedServerId,
-    routeProjectViewKey,
+    routeProjectViewKey: routeProjectContextViewKey,
     allowAllProjects,
   });
   const manualSelectionContextKey = createManualProjectSelectionContextKey({
-    routeProjectViewKey,
+    routeProjectViewKey: routeProjectContextViewKey,
   });
   const shouldPreserveMissingProject = useCallback(
     (project: HostProjectListItem) =>
@@ -166,7 +167,11 @@ export function useNewWorkspaceProjectPicker({
     (id: string) => {
       const project = projectByOptionId.get(id);
       if (!project) return;
-      if (!allowAllProjects && !project.hosts.some((host) => host.canCreateWorktree)) return;
+      if (
+        !allowAllProjects &&
+        !project.hosts.some((host) => host.worktreeSupport !== "unsupported")
+      )
+        return;
       setProjectSelection({
         contextKey: manualSelectionContextKey,
         project,

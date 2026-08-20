@@ -438,7 +438,7 @@ describe("target coalesced behavior", () => {
       });
       session.setHistory([timelineEvent(toolCall({ status: "completed", output }))]);
 
-      await harness.manager.hydrateTimelineFromProvider(agentId);
+      await harness.manager.hydrateTimelineFromProvider(agentId, { force: true });
 
       expect(getTimelineItems(await harness.manager.getTimelineRows(agentId))).toEqual([
         expectedItem,
@@ -1209,7 +1209,7 @@ describe("target coalesced behavior", () => {
       const { agentId, session } = await createManagedSession(harness);
       session.setHistory([assistant("a1"), assistant("a2"), reasoning("r1"), reasoning("r2")]);
 
-      await harness.manager.hydrateTimelineFromProvider(agentId);
+      await harness.manager.hydrateTimelineFromProvider(agentId, { force: true });
 
       const rows = await harness.manager.getTimelineRows(agentId);
       expect(getTimelineItems(rows)).toEqual([
@@ -1249,6 +1249,10 @@ describe("target coalesced behavior", () => {
 
       await expect(firstEvent).resolves.toEqual({
         done: false,
+        value: { type: "turn_started", provider: "codex", turnId: "turn-1" },
+      });
+      await expect(stream.next()).resolves.toEqual({
+        done: false,
         value: {
           type: "timeline",
           provider: "codex",
@@ -1267,14 +1271,20 @@ describe("target coalesced behavior", () => {
       expect(getTimelineItems(rows)).toEqual([{ type: "assistant_message", text: "hello world" }]);
       expect(streamEvents[0]).toMatchObject({
         type: "agent_stream",
-        event: {
-          type: "timeline",
-          item: { type: "assistant_message", text: "hello world" },
-        },
+        event: { type: "turn_started", provider: "codex", turnId: "turn-1" },
       });
       expect(streamEvents[1]).toMatchObject({
         type: "agent_stream",
-        event: { type: "turn_completed" },
+        event: {
+          type: "timeline",
+          provider: "codex",
+          turnId: "turn-1",
+          item: { type: "assistant_message", text: "hello world" },
+        },
+      });
+      expect(streamEvents[2]).toMatchObject({
+        type: "agent_stream",
+        event: { type: "turn_completed", provider: "codex", turnId: "turn-1" },
       });
     } finally {
       harness.cleanup();

@@ -21,6 +21,9 @@ type ProjectDirectoryDelta = Extract<SessionOutboundMessage, { type: "project.up
 export interface WorkspaceDirectorySnapshot {
   workspaces: Map<string, WorkspaceDescriptor>;
   projects: Map<string, ProjectDescriptor>;
+  syncCursors?: Partial<
+    Record<"projects" | "workspaces", { generation: string; afterSeq: number }>
+  >;
 }
 
 function applyProjectDelta(
@@ -43,6 +46,7 @@ function applyProjectDelta(
       ...workspace,
       projectDisplayName: project.projectDisplayName,
       projectCustomName: project.projectCustomName,
+      projectCustomIconRevision: project.projectCustomIconRevision,
       projectRootPath: project.projectRootPath,
       projectKind: project.projectKind,
     });

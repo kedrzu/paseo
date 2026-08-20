@@ -1,12 +1,6 @@
 import { getDesktopHost, isElectronRuntime } from "@/desktop/host";
 import { invokeDesktopCommand } from "@/desktop/electron/invoke";
-import {
-  parseSkillsSaveResult,
-  parseSkillsSnapshot,
-  type SkillSelection,
-  type SkillsSaveResult,
-  type SkillsSnapshot,
-} from "@/desktop/daemon/skills-snapshot";
+import type { AgentSkillSelection } from "@getpaseo/protocol/messages";
 
 export type DesktopDaemonState = "starting" | "running" | "stopped" | "errored";
 export type DesktopDaemonStopReason =
@@ -38,12 +32,6 @@ export interface DesktopDaemonLogs {
 export interface DesktopAppLogs {
   logPath: string;
   contents: string;
-}
-
-export interface DesktopPairingOffer {
-  relayEnabled: boolean;
-  url: string | null;
-  qr: string | null;
 }
 
 export interface LocalTransportTarget {
@@ -119,17 +107,6 @@ function parseDesktopDaemonLogs(raw: unknown): DesktopDaemonLogs {
   };
 }
 
-function parseDesktopPairingOffer(raw: unknown): DesktopPairingOffer {
-  if (!isRecord(raw)) {
-    throw new Error("Unexpected desktop daemon pairing response.");
-  }
-  return {
-    relayEnabled: raw.relayEnabled === true,
-    url: toStringOrNull(raw.url),
-    qr: toStringOrNull(raw.qr),
-  };
-}
-
 export function shouldUseDesktopDaemon(): boolean {
   return isElectronRuntime();
 }
@@ -165,10 +142,6 @@ export async function getDesktopAppLogs(): Promise<DesktopAppLogs> {
     logPath: toStringOrNull(raw.logPath) ?? "",
     contents: typeof raw.contents === "string" ? raw.contents : "",
   };
-}
-
-export async function getDesktopDaemonPairing(): Promise<DesktopPairingOffer> {
-  return parseDesktopPairingOffer(await invokeDesktopCommand("desktop_daemon_pairing"));
 }
 
 export async function getCliDaemonStatus(): Promise<string> {
@@ -253,38 +226,12 @@ export async function installCli(): Promise<InstallStatus> {
   return parseInstallStatus(await invokeDesktopCommand("install_cli"));
 }
 
-export type {
-  SkillOp,
-  SkillSelection,
-  SkillsSaveResult,
-  SkillsSnapshot,
-  SkillsState,
-} from "@/desktop/daemon/skills-snapshot";
-
-export async function getSkillsSnapshot(): Promise<SkillsSnapshot> {
-  return parseSkillsSnapshot(await invokeDesktopCommand("get_skills_status"));
+// COMPAT(desktopSkillSelectionMigration): added in v0.4.0; remove after 2027-02-16.
+export function readLegacySkillSelection(): Promise<AgentSkillSelection | null> {
+  return invokeDesktopCommand("read_legacy_skill_selection") as Promise<AgentSkillSelection | null>;
 }
 
-export async function installSkills(): Promise<SkillsSnapshot> {
-  return parseSkillsSnapshot(await invokeDesktopCommand("install_skills"));
-}
-
-export async function updateSkills(): Promise<SkillsSnapshot> {
-  return parseSkillsSnapshot(await invokeDesktopCommand("update_skills"));
-}
-
-export async function uninstallSkills(): Promise<SkillsSnapshot> {
-  return parseSkillsSnapshot(await invokeDesktopCommand("uninstall_skills"));
-}
-
-export async function saveSkillsSelection(
-  selection: SkillSelection,
-  confirmedRemovals: readonly string[] = [],
-): Promise<SkillsSaveResult> {
-  return parseSkillsSaveResult(
-    await invokeDesktopCommand("save_skills_selection", {
-      ...selection,
-      confirmedRemovals: [...confirmedRemovals],
-    }),
-  );
+// COMPAT(desktopSkillSelectionMigration): added in v0.4.0; remove after 2027-02-16.
+export async function deleteLegacySkillSelection(): Promise<void> {
+  await invokeDesktopCommand("delete_legacy_skill_selection");
 }

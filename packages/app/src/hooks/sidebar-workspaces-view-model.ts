@@ -8,6 +8,8 @@ import type {
   WorkspaceStructureProject,
 } from "@/projects/workspace-structure";
 import { projectDisplayNameFromProjectId } from "@/utils/project-display-name";
+import { aggregateSidebarStateBuckets } from "@/utils/sidebar-agent-state";
+import { shortenPath } from "@/utils/shorten-path";
 import type { WorkspaceAgentActivity } from "@/utils/workspace-agent-activity";
 import { resolveWorkspaceMapKeyByIdentity } from "@/utils/workspace-identity";
 
@@ -23,7 +25,7 @@ export interface SidebarWorkspacePlacement {
   projectName: string;
   projectRootPath?: string;
   workspaceDirectory?: string;
-  projectKind: WorkspaceDescriptor["projectKind"];
+  projectKind: WorkspaceStructureProject["projectKind"];
   workspaceKind: WorkspaceDescriptor["workspaceKind"];
   name: string;
 }
@@ -34,10 +36,13 @@ export interface SidebarStatusWorkspacePlacement extends SidebarWorkspacePlaceme
 }
 
 export interface SidebarWorkspaceEntry extends SidebarStatusWorkspacePlacement {
+  workspaceDirectory: string;
+  workspaceDirectoryLabel: string;
   // Raw user-set title (null when the name is derived from branch/directory).
   // Prefills the rename input and signals whether a reset is available.
   title: string | null;
   pinnedAt?: string | null;
+  labels?: string[];
   // Checkout branch (null when not a git checkout or detached HEAD).
   currentBranch: string | null;
   archivingAt: string | null;
@@ -52,7 +57,7 @@ export interface SidebarWorkspaceEntry extends SidebarStatusWorkspacePlacement {
 export interface SidebarProjectEntry {
   viewKey: string;
   projectName: string;
-  projectKind: WorkspaceDescriptor["projectKind"];
+  projectKind: WorkspaceStructureProject["projectKind"];
   iconWorkingDir: string;
   hosts: WorkspaceStructureHostPlacement[];
   workspaces: SidebarWorkspacePlacement[];
@@ -155,11 +160,14 @@ export function createSidebarWorkspaceEntry(input: {
     projectName: projectNameForWorkspace(input.workspace),
     projectRootPath: input.workspace.projectRootPath,
     workspaceDirectory: input.workspace.workspaceDirectory,
+    workspaceDirectoryLabel:
+      input.workspace.worktreeSlug ?? shortenPath(input.workspace.workspaceDirectory),
     projectKind: input.workspace.projectKind,
     workspaceKind: input.workspace.workspaceKind,
     name: input.workspace.name,
     title: input.workspace.title ?? null,
     pinnedAt: input.workspace.pinnedAt,
+    labels: input.workspace.labels ?? EMPTY_WORKSPACE_LABELS,
     currentBranch: normalizeCurrentBranch(input.workspace.gitRuntime?.currentBranch),
     statusBucket: effectiveStatus.status,
     statusEnteredAt: effectiveStatus.enteredAt,
@@ -175,6 +183,8 @@ export function createSidebarWorkspaceEntry(input: {
     hasRunningScripts: input.workspace.scripts.some((script) => script.lifecycle === "running"),
   };
 }
+
+const EMPTY_WORKSPACE_LABELS: string[] = [];
 
 function deriveEffectiveWorkspaceStatus(input: {
   serverId: string;
@@ -219,6 +229,60 @@ function getPendingInitialAgentCreateStartedAt(input: {
     }
   }
   return latestStartedAt;
+}
+
+export interface ProjectStatusSession {
+  workspaces: Map<string, WorkspaceDescriptor>;
+  workspaceAgentActivity: Map<string, WorkspaceAgentActivity>;
+}
+
+/**
+ * Most urgent status among a project's workspaces. Backs the status dot on a collapsed
+ * project row, which otherwise hides every workspace-level signal it contains.
+ *
+ * Workspaces the session hasn't hydrated yet are skipped rather than counted as done —
+ * an unknown workspace shouldn't drag the aggregate anywhere. Reuses the same
+ * activity-index + effective-status pipeline as per-workspace rows (one pass over the
+ * session's agents per server, not per workspace) rather than re-deriving it.
+ */
+export function deriveProjectStatusBucket(input: {
+  workspaces: readonly SidebarWorkspacePlacement[];
+  sessions: Record<string, ProjectStatusSession | undefined>;
+  pendingCreateAttempts?: Record<string, PendingCreateAttempt>;
+}): SidebarStateBucket {
+  const workspaceIdsByServer = new Map<string, string[]>();
+  for (const placement of input.workspaces) {
+    const existing = workspaceIdsByServer.get(placement.serverId);
+    if (existing) {
+      existing.push(placement.workspaceId);
+    } else {
+      workspaceIdsByServer.set(placement.serverId, [placement.workspaceId]);
+    }
+  }
+
+  const buckets: SidebarStateBucket[] = [];
+  for (const [serverId, workspaceIds] of workspaceIdsByServer) {
+    const session = input.sessions[serverId];
+    if (!session) continue;
+    for (const workspaceId of workspaceIds) {
+      const workspaceKey = resolveWorkspaceMapKeyByIdentity({
+        workspaces: session.workspaces,
+        workspaceId,
+      });
+      const workspace = workspaceKey ? session.workspaces.get(workspaceKey) : undefined;
+      if (!workspace) continue;
+      buckets.push(
+        deriveEffectiveWorkspaceStatus({
+          serverId,
+          workspace,
+          pendingCreateAttempts: input.pendingCreateAttempts,
+          workspaceAgentActivity: session.workspaceAgentActivity,
+        }).status,
+      );
+    }
+  }
+
+  return aggregateSidebarStateBuckets(buckets);
 }
 
 export function buildSidebarWorkspacePlacementModel(input: {

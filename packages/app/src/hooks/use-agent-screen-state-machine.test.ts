@@ -17,6 +17,7 @@ function createAgent(id: string): Agent {
     id,
     provider: "claude",
     status: "running",
+    activeTurn: { turnId: "turn-1", startedAt: now },
     createdAt: now,
     updatedAt: now,
     lastUserMessageAt: now,
@@ -314,6 +315,22 @@ describe("deriveAgentScreenViewState", () => {
 
     expect(ready.source).toBe("stale");
     expect(ready.agent.id).toBe("agent-1");
+  });
+
+  it("marks the sync error as retrying while a user-requested retry is in flight", () => {
+    const memory = createBaseMemory({
+      hasRenderedReady: true,
+      lastReadyAgent: createAgent("agent-1"),
+    });
+    const input: AgentScreenMachineInput = {
+      ...createBaseInput(),
+      visibilityCatchUpStatus: "retrying",
+    };
+
+    const result = deriveAgentScreenViewState({ input, memory });
+    const ready = expectReadyState(result.state);
+
+    expect(ready.sync).toEqual({ status: "sync_error", isRetrying: true });
   });
 
   it("returns blocking error before first paint when refresh fails", () => {

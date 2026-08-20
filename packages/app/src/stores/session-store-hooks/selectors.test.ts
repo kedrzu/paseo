@@ -4,8 +4,10 @@ import { createProjectViewKey } from "@/projects/workspace-structure";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import {
   composeWorkspaceStructure,
+  createWorkspaceStructureProjectsSelector,
   selectHasWorkspaces,
   selectHydratedWorkspaceServerIds,
+  selectWorkspaceDirectoryServerIds,
   selectProjectOrder,
   selectRecommendedProjectPaths,
   selectWorkspace,
@@ -56,6 +58,7 @@ function projectDescriptorFromTestWorkspace(workspace: WorkspaceDescriptor): Pro
     projectKey: workspace.projectId,
     projectDisplayName: workspace.projectDisplayName,
     projectCustomName: workspace.projectCustomName ?? null,
+    projectCustomIconRevision: workspace.projectCustomIconRevision ?? null,
     projectRootPath: workspace.projectRootPath,
     projectKind: workspace.projectKind,
   };
@@ -130,20 +133,32 @@ afterEach(() => {
 });
 
 describe("workspace replica authority", () => {
-  it("keeps a cached workspace addressable without publishing it as an authoritative directory", () => {
+  it("publishes a restored directory while keeping remote hydration false", () => {
     const cachedWorkspace = createWorkspace({ id: "cached-workspace" });
-    initializeWorkspaces([cachedWorkspace]);
+    useSessionStore.getState().restoreSessionReplica(SERVER_ID, {
+      agents: new Map(),
+      workspaces: new Map([[cachedWorkspace.id, cachedWorkspace]]),
+      projects: new Map([
+        [cachedWorkspace.projectId, projectDescriptorFromTestWorkspace(cachedWorkspace)],
+      ]),
+      timeline: null,
+    });
+    const cachedSession = useSessionStore.getState().sessions[SERVER_ID];
+    if (!cachedSession) throw new Error("expected initialized session");
 
-    const cachedServerIds = selectHydratedWorkspaceServerIds(useSessionStore.getState(), [
+    const cachedServerIds = selectWorkspaceDirectoryServerIds(useSessionStore.getState(), [
       SERVER_ID,
     ]);
 
     expect(selectWorkspace(useSessionStore.getState(), SERVER_ID, cachedWorkspace.id)).toBe(
       cachedWorkspace,
     );
-    expect(selectWorkspaceStructureProjects(useSessionStore.getState(), cachedServerIds)).toEqual(
-      [],
-    );
+    expect(cachedSession.hasHydratedWorkspaces).toBe(false);
+    expect(
+      selectWorkspaceStructureProjects(useSessionStore.getState(), cachedServerIds).map(
+        (project) => project.workspaceKeys,
+      ),
+    ).toEqual([[`${SERVER_ID}:${cachedWorkspace.id}`]]);
 
     const authoritativeWorkspace = createWorkspace({
       id: "authoritative-workspace",
@@ -324,6 +339,27 @@ describe("selectWorkspaceFields", () => {
 });
 
 describe("workspace structure composition", () => {
+  it("reuses structure when unrelated session state changes", () => {
+    const workspace = createWorkspace({ id: "workspace-a" });
+    const workspaces = new Map([[workspace.id, workspace]]);
+    const projects = new Map([
+      [workspace.projectId, projectDescriptorFromTestWorkspace(workspace)],
+    ]);
+    const selectProjects = createWorkspaceStructureProjectsSelector([SERVER_ID]);
+    const before = selectProjects({ sessions: { [SERVER_ID]: { workspaces, projects } } });
+    const after = selectProjects({
+      sessions: {
+        [SERVER_ID]: {
+          workspaces,
+          projects,
+          hasHydratedWorkspaces: true,
+        },
+      },
+    });
+
+    expect(after).toBe(before);
+  });
+
   function snapshotStructure(
     serverId: string,
     sidebar: SidebarOrderSnapshot,
@@ -348,6 +384,7 @@ describe("workspace structure composition", () => {
       projectKey: "project-a",
       projectDisplayName: "Project A",
       projectCustomName: null,
+      projectCustomIconRevision: null,
       projectRootPath: "/repo/a",
       projectKind: "git",
     };

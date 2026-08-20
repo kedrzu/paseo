@@ -2,7 +2,7 @@ import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useCallback, useMemo } from "react";
 import { View, Text, Pressable, type PressableStateCallbackType } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { ChevronDown, Info, MoreVertical } from "lucide-react-native";
+import { ChevronDown, MoreVertical } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import {
   DropdownMenu,
@@ -15,8 +15,9 @@ import { Shortcut } from "@/components/ui/shortcut";
 import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
 import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 import type { ShortcutKey } from "@/utils/format-shortcut";
-import { useToast } from "@/contexts/toast-context";
 import type { GitAction, GitActions } from "@/git/policy";
+import { useGitActionRunner } from "@/git/use-actions";
+import { buttonControlHeight } from "@/components/ui/control-geometry";
 
 interface GitActionsSplitButtonProps {
   gitActions: GitActions;
@@ -76,7 +77,7 @@ function GitActionMenuItem({
 export function GitActionsSplitButton({ gitActions, hideLabels }: GitActionsSplitButtonProps) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
-  const toast = useToast();
+  const runGitAction = useGitActionRunner();
   const archiveShortcutKeys = useShortcutKeys("archive-workspace");
 
   const getActionDisplayLabel = useCallback((action: GitAction): string => {
@@ -85,26 +86,12 @@ export function GitActionsSplitButton({ gitActions, hideLabels }: GitActionsSpli
     return action.label;
   }, []);
 
-  const handleActionSelect = useCallback(
-    (action: GitAction) => {
-      if (action.unavailableMessage) {
-        toast.show(action.unavailableMessage, {
-          durationMs: 3200,
-          icon: <Info size={16} color={theme.colors.foreground} />,
-        });
-        return;
-      }
-      action.handler();
-    },
-    [theme.colors.foreground, toast],
-  );
-
   const handlePrimaryPress = useCallback(() => {
     if (!gitActions.primary) {
       return;
     }
-    handleActionSelect(gitActions.primary);
-  }, [gitActions.primary, handleActionSelect]);
+    runGitAction(gitActions.primary);
+  }, [gitActions.primary, runGitAction]);
 
   const overflowMenuButtonStyle = useMemo(() => [styles.iconButton, styles.overflowMenuButton], []);
 
@@ -172,7 +159,7 @@ export function GitActionsSplitButton({ gitActions, hideLabels }: GitActionsSpli
                   <GitActionMenuItem
                     key={action.id}
                     action={action}
-                    onSelect={handleActionSelect}
+                    onSelect={runGitAction}
                     archiveShortcutKeys={archiveShortcutKeys}
                     needsSeparator={action.startsGroup}
                     showSeparator={index > 0}
@@ -205,7 +192,7 @@ export function GitActionsSplitButton({ gitActions, hideLabels }: GitActionsSpli
               <GitActionMenuItem
                 key={action.id}
                 action={action}
-                onSelect={handleActionSelect}
+                onSelect={runGitAction}
                 closeOnSelect={false}
               />
             ))}
@@ -224,16 +211,16 @@ const styles = StyleSheet.create((theme) => ({
     flexShrink: 0,
   },
   splitButton: {
+    height: buttonControlHeight.xs,
     flexDirection: "row",
     alignItems: "stretch",
-    borderRadius: theme.borderRadius.md,
+    borderRadius: theme.borderRadius.lg,
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.borderAccent,
     overflow: "hidden",
   },
   splitButtonPrimary: {
     paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[1],
     justifyContent: "center",
     position: "relative",
   },
@@ -241,8 +228,8 @@ const styles = StyleSheet.create((theme) => ({
     opacity: 0.6,
   },
   splitButtonText: {
-    fontSize: theme.fontSize.sm,
-    lineHeight: theme.fontSize.sm * 1.5,
+    fontSize: theme.fontSize.base,
+    lineHeight: theme.fontSize.base * 1.5,
     color: theme.colors.foreground,
     fontWeight: theme.fontWeight.normal,
   },
@@ -263,11 +250,11 @@ const styles = StyleSheet.create((theme) => ({
     borderLeftColor: theme.colors.borderAccent,
   },
   iconButton: {
-    width: 32,
-    height: 32,
+    width: buttonControlHeight.xs,
+    height: buttonControlHeight.xs,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: theme.borderRadius.md,
+    borderRadius: theme.borderRadius.lg,
   },
   overflowMenuButton: {
     marginRight: -theme.spacing[2],

@@ -5,6 +5,7 @@ import type {
 import { type Forge, getForgePresentation } from "@/git/forge";
 import { parseClientForgeFacts } from "@/git/forges";
 import type { ForgeSpecificStatusFacts } from "@/git/merge-capability";
+import { deriveIdentityColorName, identityColor } from "@/styles/identity-colors";
 import { type CheckStatus, mapCheckStatus } from "./check-status";
 import { getNativeFallbackChecks } from "./native-data";
 
@@ -26,7 +27,11 @@ export interface PrPaneCheck {
   name: string;
   workflow?: string;
   status: CheckStatus;
-  duration?: string;
+  /**
+   * What the row says about time: how long a finished check took ("2m"), or how long a
+   * running one has been going ("running 2m"). Absent when the forge reports neither.
+   */
+  timing?: string;
   url: string;
   /**
    * Forge-neutral reference for fetching this check's detail/logs on demand. Any
@@ -101,17 +106,6 @@ type CheckoutPrStatus = CheckoutPrStatusResponse["payload"]["status"];
 type PullRequestTimeline = PullRequestTimelineResponse["payload"];
 type PullRequestTimelineItem = PullRequestTimeline["items"][number];
 
-const AVATAR_COLORS = [
-  "#8b5cf6",
-  "#f97316",
-  "#0ea5e9",
-  "#10b981",
-  "#ef4444",
-  "#eab308",
-  "#ec4899",
-  "#6366f1",
-];
-
 export function mapPrPaneData(
   status: CheckoutPrStatus,
   timeline: PullRequestTimeline | null | undefined,
@@ -156,8 +150,11 @@ function toProviderMetadata(forge: Forge): PullRequestProviderMetadata {
   return { id: forge, label: getForgePresentation(forge).brandLabel };
 }
 
+// Avatars are identity, not status: they draw from the shared identity table so a PR
+// participant square sits at the same weight as a project icon. Logins are matched
+// case-insensitively, so the same person keeps one color across forges.
 export function deriveAvatarColor(login: string): string {
-  return AVATAR_COLORS[hashLogin(login) % AVATAR_COLORS.length];
+  return identityColor(deriveIdentityColorName(login.toLowerCase()));
 }
 
 export function formatAge(createdAtMs: number, nowMs = Date.now()): string {
@@ -219,14 +216,16 @@ function mapCheck(
     return [];
   }
 
+  const status = mapCheckStatus(check.status);
+  const timing = formatCheckTiming(check.duration, status);
   return [
     {
       provider: forge,
       name: check.name,
-      status: mapCheckStatus(check.status),
+      status,
       url: check.url,
       ...(check.workflow ? { workflow: check.workflow } : {}),
-      ...(check.duration ? { duration: check.duration } : {}),
+      ...(timing ? { timing } : {}),
       ...(check.checkRunId !== undefined || check.workflowRunId !== undefined
         ? {
             detailRef: {
@@ -237,6 +236,18 @@ function mapCheck(
         : {}),
     },
   ];
+}
+
+/**
+ * The forge measures how long a check ran, whether or not it has finished. Which one it
+ * is comes from the status: on a running check a bare "2m" would read as "took 2m", so
+ * the row says the run is still going.
+ */
+function formatCheckTiming(duration: string | undefined, status: CheckStatus): string | null {
+  if (!duration) {
+    return null;
+  }
+  return status === "pending" ? `running ${duration}` : duration;
 }
 
 function mapActivity(item: PullRequestTimelineItem, nowMs: number, forge: Forge): PrPaneActivity[] {
@@ -306,14 +317,6 @@ function parsePullRequestNumber(url: string): number | null {
   } catch {
     return null;
   }
-}
-
-function hashLogin(login: string): number {
-  let hash = 0;
-  for (const character of login.toLowerCase()) {
-    hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
-  }
-  return hash;
 }
 
 export function getStateLabel(state: PrState): string {
