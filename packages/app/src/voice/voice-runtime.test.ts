@@ -40,6 +40,7 @@ function createAudioPayload(args: {
   chunkIndex: number;
   isLastChunk: boolean;
   isVoiceMode?: boolean;
+  format?: string;
 }) {
   return {
     id: args.id,
@@ -47,7 +48,7 @@ function createAudioPayload(args: {
     chunkIndex: args.chunkIndex,
     isLastChunk: args.isLastChunk,
     isVoiceMode: args.isVoiceMode ?? true,
-    format: "pcm",
+    format: args.format ?? "pcm",
     audio: Buffer.from(`chunk-${args.chunkIndex}`).toString("base64"),
   } as const;
 }
@@ -187,6 +188,37 @@ describe("voice runtime", () => {
     await vi.waitFor(() => {
       expect(adapter.audioPlayed).toHaveBeenCalledWith("chunk-0");
       expect(engine.play).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("plays local TTS audio at the sample rate the daemon reports", async () => {
+    const adapter = createSessionAdapter();
+    const engine = createAudioEngineMock();
+    const played: string[] = [];
+    vi.mocked(engine.play).mockImplementation(async (source: { type: string }) => {
+      played.push(source.type);
+      return 0.1;
+    });
+    const { runtime } = createRuntime({ engine });
+    runtime.registerSession(adapter);
+
+    await runtime.startVoice("server-1", "agent-1");
+    runtime.onTurnEvent("server-1", "agent-1", "turn_started");
+
+    // Piper medium voices synthesize at 22.05 kHz, not the 24 kHz OpenAI PCM default.
+    runtime.handleAudioOutput(
+      "server-1",
+      createAudioPayload({
+        id: "chunk-0",
+        groupId: "group-1",
+        chunkIndex: 0,
+        isLastChunk: true,
+        format: "pcm;rate=22050",
+      }),
+    );
+
+    await vi.waitFor(() => {
+      expect(played).toContain("audio/pcm;rate=22050");
     });
   });
 

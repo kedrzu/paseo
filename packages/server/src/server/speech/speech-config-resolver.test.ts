@@ -134,6 +134,25 @@ describe("resolveSpeechConfig", () => {
     expect(result.openai?.stt?.model).toBe("gpt-4o-transcribe");
   });
 
+  test("resolves a Piper voice from its canonical mixed-case name without a speaker id", () => {
+    const persisted = PersistedConfigSchema.parse({
+      features: {
+        voiceMode: {
+          tts: { provider: "local", model: "piper-pl_PL-mc_speech-medium" },
+        },
+      },
+    });
+
+    const result = resolveSpeechConfig({
+      paseoHome: "/tmp/paseo-home",
+      env: {} as NodeJS.ProcessEnv,
+      persisted,
+    });
+
+    expect(result.speech.local?.models.voiceTts).toBe("piper-pl_pl-mc_speech-medium");
+    expect(result.speech.local?.models).not.toHaveProperty("voiceTtsSpeakerId");
+  });
+
   test("resolves STT language from env, settings, and voice-to-dictation fallback", () => {
     const persisted = PersistedConfigSchema.parse({
       features: {

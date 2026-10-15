@@ -228,3 +228,40 @@ downloadTest(
   },
   15 * 60_000,
 );
+
+downloadTest(
+  "downloads a Piper voice and synthesizes at the model sample rate",
+  async () => {
+    const logger = pino({ level: "silent" });
+    const modelsDir = mkdtempSync(path.join(tmpdir(), "paseo-piper-download-"));
+
+    try {
+      await ensureSherpaOnnxModels({
+        modelsDir,
+        modelIds: ["piper-pl_pl-mc_speech-medium"],
+        logger,
+      });
+
+      const tts = new SherpaOnnxTTS(
+        {
+          preset: "piper-pl_pl-mc_speech-medium",
+          modelDir: getSherpaOnnxModelDir(modelsDir, "piper-pl_pl-mc_speech-medium"),
+        },
+        logger,
+      );
+      const { stream, format } = await tts.synthesizeSpeech(
+        "Dzień dobry, to jest notatka głosowa.",
+      );
+      const { combined } = await readAllChunks(stream);
+      tts.free();
+
+      expect(format).toBe("pcm;rate=22050");
+      const seconds = combined.byteLength / 2 / 22050;
+      expect(seconds).toBeGreaterThan(1);
+      expect(seconds).toBeLessThan(6);
+    } finally {
+      rmSync(modelsDir, { recursive: true, force: true });
+    }
+  },
+  10 * 60_000,
+);

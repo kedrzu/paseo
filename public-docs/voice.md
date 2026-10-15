@@ -74,6 +74,29 @@ For multilingual local dictation, set the model to v3 — it auto-detects the la
 
 The `language` field applies only to the OpenAI STT provider: set `features.dictation.stt.language` for dictation and `features.voiceMode.stt.language` for voice mode. If voice language is omitted, Paseo uses the dictation language before falling back to `en`. It has no effect on the local Parakeet models.
 
+### Local TTS models and voices
+
+| Model ID                       | Voice                                                       |
+| ------------------------------ | ----------------------------------------------------------- |
+| `kokoro-en-v0_19`              | Kokoro, English (default). Pick a speaker with `speakerId`. |
+| `piper-pl_pl-mc_speech-medium` | Piper `pl_PL-mc_speech-medium`, Polish                      |
+| `piper-pl_pl-gosia-medium`     | Piper `pl_PL-gosia-medium`, Polish                          |
+| `piper-pl_pl-darkman-medium`   | Piper `pl_PL-darkman-medium`, Polish                        |
+
+Each voice speaks one language, and the `language` field does not change it, so pick the voice that matches the language your voice agent replies in. For Polish voice mode, pair a Piper voice with `parakeet-tdt-0.6b-v3-int8`:
+
+```json
+{
+  "version": 1,
+  "features": {
+    "voiceMode": {
+      "stt": { "provider": "local", "model": "parakeet-tdt-0.6b-v3-int8" },
+      "tts": { "provider": "local", "model": "piper-pl_pl-mc_speech-medium" }
+    }
+  }
+}
+```
+
 ## OpenAI Voice Option
 
 You can switch dictation, voice STT, and voice TTS to OpenAI by setting provider fields to `openai` and providing OpenAI credentials.

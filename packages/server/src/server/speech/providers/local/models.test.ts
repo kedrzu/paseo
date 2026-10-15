@@ -48,6 +48,14 @@ function setupModelsDirWithArchive(): { modelsDir: string; modelDir: string; arc
 }
 
 describe("local speech models", () => {
+  test("checks every file a TTS engine loads before treating the model as installed", () => {
+    for (const model of listLocalSpeechModels()) {
+      if (model.kind !== "tts") continue;
+      const { engine: _engine, ...files } = model.tts;
+      expect(model.requiredFiles).toEqual(expect.arrayContaining(Object.values(files)));
+    }
+  });
+
   test("reinstalls a model whose extraction was interrupted", async () => {
     // An interrupted extraction leaves the archive in .downloads and a truncated file in place.
     const { modelsDir, modelDir, archive } = setupModelsDirWithArchive();

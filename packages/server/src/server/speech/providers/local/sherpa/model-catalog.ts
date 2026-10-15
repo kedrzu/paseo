@@ -4,13 +4,40 @@ export type SherpaOnnxModelKind = "stt-offline" | "tts";
 
 type DefaultModelRole = "stt" | "tts";
 
-interface SherpaOnnxCatalogEntry {
-  kind: SherpaOnnxModelKind;
+// Paths are relative to the extracted model directory and map onto the sherpa-onnx
+// OfflineTts model config of the same engine name.
+type SherpaOnnxTtsEngineFiles =
+  | { engine: "kokoro"; model: string; voices: string; tokens: string; dataDir: string }
+  | { engine: "vits"; model: string; tokens: string; dataDir: string };
+
+interface SherpaOnnxCatalogEntryBase {
   archiveUrl: string;
   extractedDir: string;
   requiredFiles: string[];
   description: string;
   defaultFor?: DefaultModelRole;
+}
+
+type SherpaOnnxCatalogEntry =
+  | (SherpaOnnxCatalogEntryBase & { kind: "stt-offline" })
+  | (SherpaOnnxCatalogEntryBase & { kind: "tts"; tts: SherpaOnnxTtsEngineFiles });
+
+const PIPER_ARCHIVE_BASE_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models";
+
+// Piper voices ship as sherpa-onnx VITS archives named after the Piper voice
+// (`vits-piper-pl_PL-gosia-medium`). Model ids are lowercase because the id schema
+// lowercases input.
+function piperVoice(voice: string, description: string) {
+  const extractedDir = `vits-piper-${voice}`;
+  const model = `${voice}.onnx`;
+  return {
+    kind: "tts",
+    archiveUrl: `${PIPER_ARCHIVE_BASE_URL}/${extractedDir}.tar.bz2`,
+    extractedDir,
+    requiredFiles: [model, "tokens.txt", "espeak-ng-data"],
+    description,
+    tts: { engine: "vits", model, tokens: "tokens.txt", dataDir: "espeak-ng-data" },
+  } as const satisfies SherpaOnnxCatalogEntry;
 }
 
 export const SHERPA_ONNX_MODEL_CATALOG = {
@@ -40,7 +67,26 @@ export const SHERPA_ONNX_MODEL_CATALOG = {
     requiredFiles: ["model.onnx", "voices.bin", "tokens.txt", "espeak-ng-data"],
     description: "Kokoro TTS (higher quality; larger).",
     defaultFor: "tts",
+    tts: {
+      engine: "kokoro",
+      model: "model.onnx",
+      voices: "voices.bin",
+      tokens: "tokens.txt",
+      dataDir: "espeak-ng-data",
+    },
   },
+  "piper-pl_pl-mc_speech-medium": piperVoice(
+    "pl_PL-mc_speech-medium",
+    "Piper mc_speech (Polish, single speaker, 22.05 kHz).",
+  ),
+  "piper-pl_pl-gosia-medium": piperVoice(
+    "pl_PL-gosia-medium",
+    "Piper gosia (Polish, single speaker, 22.05 kHz).",
+  ),
+  "piper-pl_pl-darkman-medium": piperVoice(
+    "pl_PL-darkman-medium",
+    "Piper darkman (Polish, single speaker, 22.05 kHz).",
+  ),
 } as const satisfies Record<string, SherpaOnnxCatalogEntry>;
 
 export type SherpaOnnxModelId = keyof typeof SHERPA_ONNX_MODEL_CATALOG;

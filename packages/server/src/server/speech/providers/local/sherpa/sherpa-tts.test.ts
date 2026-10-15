@@ -3,7 +3,10 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
-import { SherpaOnnxTTS } from "./sherpa-tts.js";
+import { SherpaOnnxTTS, type SherpaTtsPreset } from "./sherpa-tts.js";
+
+const KOKORO_FILES = ["model.onnx", "voices.bin", "tokens.txt"];
+const PIPER_FILES = ["pl_PL-mc_speech-medium.onnx", "tokens.txt"];
 
 const directories: string[] = [];
 afterEach(() => {
@@ -11,21 +14,36 @@ afterEach(() => {
     rmSync(directory, { recursive: true, force: true });
 });
 
-function createTts(numThreads?: number, beforeGenerate?: () => Promise<void>) {
+interface CreateTtsOptions {
+  preset?: SherpaTtsPreset;
+  files?: string[];
+  sampleRate?: number;
+}
+
+function createModelDir(files: string[]): string {
   const modelDir = mkdtempSync(join(tmpdir(), "paseo-tts-"));
   directories.push(modelDir);
-  for (const name of ["model.onnx", "voices.bin", "tokens.txt"])
-    writeFileSync(join(modelDir, name), "");
+  for (const name of files) writeFileSync(join(modelDir, name), "");
   mkdirSync(join(modelDir, "espeak-ng-data"));
+  return modelDir;
+}
+
+function createTts(
+  numThreads?: number,
+  beforeGenerate?: () => Promise<void>,
+  options: CreateTtsOptions = {},
+) {
+  const { preset = "kokoro-en-v0_19", files = KOKORO_FILES, sampleRate = 24000 } = options;
+  const modelDir = createModelDir(files);
   let nativeConfig: unknown;
   const requests: unknown[] = [];
   const released: boolean[] = [];
   const tts = new SherpaOnnxTTS(
-    { preset: "kokoro-en-v0_19", modelDir, numThreads },
+    { preset, modelDir, numThreads },
     pino({ level: "silent" }),
     () => ({
       OfflineTts: class {
-        sampleRate = 24000;
+        sampleRate = sampleRate;
         free() {
           released.push(true);
         }
@@ -38,12 +56,12 @@ function createTts(numThreads?: number, beforeGenerate?: () => Promise<void>) {
         }
         generate(request: unknown) {
           requests.push(request);
-          return { samples: Float32Array.from([0, 0.5, -0.5, 0.25]), sampleRate: 24000 };
+          return { samples: Float32Array.from([0, 0.5, -0.5, 0.25]), sampleRate };
         }
       },
     }),
   );
-  return { tts, requests, nativeConfig, released };
+  return { tts, requests, nativeConfig, released, modelDir };
 }
 
 async function yieldNativeQueue(): Promise<void> {
@@ -127,6 +145,51 @@ describe("SherpaOnnxTTS", () => {
     expect(requests).toHaveLength(1);
     expect(released).toEqual([true]);
     await expect(tts.synthesizeSpeech("third")).rejects.toThrow("TTS provider closed");
+  });
+
+  it("configures the kokoro engine for Kokoro models", () => {
+    const { nativeConfig, modelDir } = createTts();
+    expect(nativeConfig).toMatchObject({
+      model: {
+        kokoro: {
+          model: join(modelDir, "model.onnx"),
+          voices: join(modelDir, "voices.bin"),
+          tokens: join(modelDir, "tokens.txt"),
+          dataDir: join(modelDir, "espeak-ng-data"),
+        },
+      },
+    });
+    expect(nativeConfig).not.toHaveProperty("model.vits");
+  });
+
+  it("configures the vits engine for Piper voices and reports the model sample rate", async () => {
+    const { tts, nativeConfig, modelDir } = createTts(undefined, undefined, {
+      preset: "piper-pl_pl-mc_speech-medium",
+      files: PIPER_FILES,
+      sampleRate: 22050,
+    });
+    expect(nativeConfig).toMatchObject({
+      model: {
+        vits: {
+          model: join(modelDir, "pl_PL-mc_speech-medium.onnx"),
+          tokens: join(modelDir, "tokens.txt"),
+          dataDir: join(modelDir, "espeak-ng-data"),
+        },
+      },
+    });
+    expect(nativeConfig).not.toHaveProperty("model.kokoro");
+    const result = await tts.synthesizeSpeech("Dzień dobry");
+    expect(result.format).toBe("pcm;rate=22050");
+    result.stream.destroy();
+  });
+
+  it("fails fast when a Piper voice is missing its model file", () => {
+    expect(() =>
+      createTts(undefined, undefined, {
+        preset: "piper-pl_pl-mc_speech-medium",
+        files: ["tokens.txt"],
+      }),
+    ).toThrow("Missing TTS model");
   });
 
   it.each([undefined, 4])(

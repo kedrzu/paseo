@@ -1,12 +1,14 @@
 import type pino from "pino";
 import { Readable } from "node:stream";
 import { existsSync } from "node:fs";
+import path from "node:path";
 
 import type { SpeechStreamResult, TextToSpeechProvider } from "../../../speech-provider.js";
 import { chunkBuffer, float32ToPcm16le } from "../../../audio.js";
+import { getSherpaOnnxModelSpec, type LocalTtsModelId } from "./model-catalog.js";
 import { loadSherpaOnnxNode } from "./sherpa-onnx-node-loader.js";
 
-export type SherpaTtsPreset = "kokoro-en-v0_19";
+export type SherpaTtsPreset = LocalTtsModelId;
 
 export interface SherpaTtsConfig {
   preset: SherpaTtsPreset;
@@ -17,9 +19,40 @@ export interface SherpaTtsConfig {
   numThreads?: number;
 }
 
+function isPositiveFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
 function assertFileExists(filePath: string, label: string): void {
   if (!existsSync(filePath)) {
     throw new Error(`Missing ${label}: ${filePath}`);
+  }
+}
+
+function buildEngineConfig(config: SherpaTtsConfig): Record<string, unknown> {
+  const spec = getSherpaOnnxModelSpec(config.preset);
+  if (spec.kind !== "tts") {
+    throw new Error(`Local speech model ${config.preset} is not a TTS model`);
+  }
+  const files = spec.tts;
+  const inModelDir = (rel: string) => path.join(config.modelDir, rel);
+  const model = inModelDir(files.model);
+  const tokens = inModelDir(files.tokens);
+  const dataDir = inModelDir(files.dataDir);
+
+  assertFileExists(model, "TTS model");
+  assertFileExists(tokens, "TTS tokens");
+  assertFileExists(dataDir, "TTS espeak-ng dataDir");
+  const lengthScale = config.lengthScale ?? 1.0;
+
+  switch (files.engine) {
+    case "kokoro": {
+      const voices = inModelDir(files.voices);
+      assertFileExists(voices, "TTS voices");
+      return { kokoro: { model, voices, tokens, dataDir, lengthScale } };
+    }
+    case "vits":
+      return { vits: { model, tokens, dataDir, lengthScale } };
   }
 }
 
@@ -59,27 +92,11 @@ export class SherpaOnnxTTS implements TextToSpeechProvider {
       throw new Error("sherpa-onnx-node OfflineTts is unavailable");
     }
 
-    const modelPath = `${config.modelDir}/model.onnx`;
-    const voicesPath = `${config.modelDir}/voices.bin`;
-    const tokensPath = `${config.modelDir}/tokens.txt`;
-    const dataDir = `${config.modelDir}/espeak-ng-data`;
-
-    assertFileExists(modelPath, "TTS model");
-    assertFileExists(voicesPath, "TTS voices");
-    assertFileExists(tokensPath, "TTS tokens");
-    assertFileExists(dataDir, "TTS espeak-ng dataDir");
-
     const modelConfig = {
       // The native parser reads these under model, despite the upstream JS typedef.
       numThreads: config.numThreads ?? 2,
       provider: "cpu",
-      kokoro: {
-        model: modelPath,
-        voices: voicesPath,
-        tokens: tokensPath,
-        dataDir,
-        lengthScale: config.lengthScale ?? 1.0,
-      },
+      ...buildEngineConfig(config),
     };
 
     const offlineTtsConfig = {
@@ -133,22 +150,15 @@ export class SherpaOnnxTTS implements TextToSpeechProvider {
     // Copy to avoid "External buffers are not allowed" when sherpa-onnx
     // returns a Float32Array backed by native memory.
     const samples = rawSamples ? Float32Array.from(rawSamples) : null;
-    let sampleRate: number;
-    if (
-      audio &&
-      typeof audio.sampleRate === "number" &&
-      Number.isFinite(audio.sampleRate) &&
-      audio.sampleRate > 0
-    ) {
-      sampleRate = audio.sampleRate;
-    } else if (typeof this.tts.sampleRate === "number") {
-      sampleRate = this.tts.sampleRate;
-    } else {
-      sampleRate = 24000;
-    }
+    // Models differ (Kokoro 24 kHz, Piper medium 22.05 kHz), so the rate comes from the
+    // model and is never assumed. Clients play PCM at the rate in the format string.
+    const sampleRate = [audio?.sampleRate, this.tts.sampleRate].find(isPositiveFiniteNumber);
 
     if (!samples) {
       throw new Error("Unexpected sherpa TTS output: missing Float32 samples");
+    }
+    if (sampleRate === undefined) {
+      throw new Error("Unexpected sherpa TTS output: missing sample rate");
     }
 
     const pcm16 = float32ToPcm16le(samples);
